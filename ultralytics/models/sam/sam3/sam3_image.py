@@ -283,7 +283,12 @@ class SAM3SemanticModel(torch.nn.Module):
             backbone_out.pop("backbone_fpn", None)
 
     def forward_grounding(
-        self, backbone_out: dict[str, torch.Tensor], text_ids: torch.Tensor, geometric_prompt: Prompt = None
+        self,
+        backbone_out: dict[str, torch.Tensor],
+        text_ids: torch.Tensor,
+        geometric_prompt: Prompt = None,
+        visual_prompt_embed=None,
+        visual_prompt_mask=None,
     ):
         """Forward pass for grounding (detection + segmentation) given input images and text."""
         backbone_out, img_feats, img_pos_embeds, vis_feat_sizes = SAM2Model._prepare_backbone_features(
@@ -291,7 +296,11 @@ class SAM3SemanticModel(torch.nn.Module):
         )
         backbone_out.update({k: v for k, v in self.text_embeddings.items()})
         with torch.profiler.record_function("SAM3Image._encode_prompt"):
-            prompt, prompt_mask = self._encode_prompt(img_feats, img_pos_embeds, vis_feat_sizes, geometric_prompt)
+            prompt, prompt_mask = self._encode_prompt(
+                img_feats, img_pos_embeds, vis_feat_sizes, geometric_prompt,
+                visual_prompt_embed=visual_prompt_embed,
+                visual_prompt_mask=visual_prompt_mask,
+            )
         # index text features (note that regardless of early or late fusion, the batch size of
         # `txt_feats` is always the number of *prompts* in the encoder)
         txt_feats = backbone_out["language_features"][:, text_ids]

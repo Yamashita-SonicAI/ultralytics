@@ -2269,7 +2269,15 @@ class SAM3SemanticPredictor(SAM3Predictor):
             labels = labels.view(-1, 1)  # (N, 1)
         return bboxes, labels
 
-    def _inference_features(self, features, bboxes=None, labels=None, text: list[str] | None = None):
+    def _inference_features(
+        self,
+        features,
+        bboxes=None,
+        labels=None,
+        text: list[str] | None = None,
+        visual_prompt_embed=None,
+        visual_prompt_mask=None,
+    ):
         """Run inference on the extracted features with optional bounding boxes and labels."""
         # NOTE: priority: bboxes > text > pre-set classes
         nc = 1 if bboxes is not None else len(text) if text is not None else len(self.model.names)
@@ -2281,10 +2289,16 @@ class SAM3SemanticPredictor(SAM3Predictor):
                 text = ["visual"]  # bboxes needs this `visual` text prompt if no text passed
         if text is not None and self.model.names != text:
             self.model.set_classes(text=text)
+        # visual_prompt_embedをncに合わせてexpand
+        if visual_prompt_embed is not None and nc > 1:
+            visual_prompt_embed = visual_prompt_embed.expand(-1, nc, -1)
+            visual_prompt_mask = visual_prompt_mask.expand(nc, -1)
         outputs = self.model.forward_grounding(
             backbone_out=features,
             text_ids=torch.arange(nc, device=self.device, dtype=torch.long),
             geometric_prompt=geometric_prompt,
+            visual_prompt_embed=visual_prompt_embed,
+            visual_prompt_mask=visual_prompt_mask,
         )
         return outputs
 
@@ -2327,9 +2341,15 @@ class SAM3SemanticPredictor(SAM3Predictor):
         bboxes = self.prompts.pop("bboxes", bboxes)
         labels = self.prompts.pop("labels", labels)
         text = self.prompts.pop("text", text)
+        visual_prompt_embed = self.prompts.pop("visual_prompt_embed", None)
+        visual_prompt_mask = self.prompts.pop("visual_prompt_mask", None)
         features = self.get_im_features(im) if self.features is None else self.features
         prompts = self._prepare_geometric_prompts(self.batch[1][0].shape[:2], bboxes, labels)
-        return self._inference_features(features, *prompts, text=text)
+        return self._inference_features(
+            features, *prompts, text=text,
+            visual_prompt_embed=visual_prompt_embed,
+            visual_prompt_mask=visual_prompt_mask,
+        )
 
     @smart_inference_mode()
     def inference_features(
@@ -2339,6 +2359,8 @@ class SAM3SemanticPredictor(SAM3Predictor):
         bboxes=None,
         labels=None,
         text: list[str] | None = None,
+        visual_prompt_embed=None,
+        visual_prompt_mask=None,
     ):
         """Perform prompts preprocessing and inference on provided image features using the SAM model.
 
@@ -2348,6 +2370,8 @@ class SAM3SemanticPredictor(SAM3Predictor):
             bboxes (np.ndarray | list[list[float]] | None): Bounding boxes in xyxy format with shape (N, 4). pixels.
             labels (np.ndarray | list[int] | None): Point prompt labels with shape (N, ).
             text (list[str] | None): List of text prompts corresponding to the classes.
+            visual_prompt_embed (torch.Tensor | None): Visual prompt embeddings from reference features.
+            visual_prompt_mask (torch.Tensor | None): Visual prompt attention mask.
 
         Returns:
             pred_masks (torch.Tensor): The output masks in shape (C, H, W), where C is the number of generated masks.
@@ -2358,7 +2382,11 @@ class SAM3SemanticPredictor(SAM3Predictor):
             - The input features is a torch.Tensor of shape (B, C, H, W) if performing on SAM, or a dict[str, Any] if performing on SAM2.
         """
         prompts = self._prepare_geometric_prompts(src_shape[:2], bboxes, labels)
-        preds = self._inference_features(features, *prompts, text=text)
+        preds = self._inference_features(
+            features, *prompts, text=text,
+            visual_prompt_embed=visual_prompt_embed,
+            visual_prompt_mask=visual_prompt_mask,
+        )
         pred_boxes = preds["pred_boxes"]  # (nc, num_query, 4)
         pred_logits = preds["pred_logits"]
         pred_masks = preds["pred_masks"]
