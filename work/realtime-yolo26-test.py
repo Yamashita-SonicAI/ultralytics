@@ -41,12 +41,13 @@ def main():
     # -----------------------------
     device = 0
     half = False
-    conf_th = 0.25          # 低いほど出やすい（誤検出も増える）
+    conf_th = 0.01       # 低いほど出やすい（誤検出も増える）
     mask_th = 0.5           # マスク二値化用
     imgsz = 640             # 必要なら固定（安定＆高速化しやすい）
 
     model = YOLOE("yoloe-26x-seg.pt")
-    model.set_classes(["hand","person"])     # 手だけ（必要なら ["hand","person"]）
+    model.set_classes(["hand","person"])
+    # model.set_classes(["shiny object", "metallic object", "silver object", "reflective object"])     # 手だけ（必要なら ["hand","person"]）
 
     # -----------------------------
     # カメラ初期化
