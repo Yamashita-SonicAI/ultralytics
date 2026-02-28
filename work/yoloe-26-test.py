@@ -9,13 +9,19 @@ from ultralytics import YOLOE
 # settings
 # ----------------------------
 IMG_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
-INPUT_DIR = "/home/sonicai/workspace/yamada-develop/ultralytics/datasets/hand-keypoints/images/val"          # ここを画像ディレクトリに
-OUT_DIR = "/home/sonicai/workspace/yamada-develop/ultralytics/datasets/output/hand-l"          # 出力先
-CONF_TH = 0.25                    # 必要なら
+INPUT_DIR = "/home/sonicai/workspace/yamada-develop/yolo-dev/AnomalyDetection/TestSet"          # ここを画像ディレクトリに
+OUT_DIR = "/home/sonicai/workspace/yamada-develop/yolo-dev/AnomalyDetection/Result"          # 出力先
+CONF_TH = 0.01                    # 必要なら
 MASK_TH = 0.4
 
 # class list (YOLOE text prompt)
-CLASSES = ["hand", "person"]      # 例：順序は任意
+CLASSES = [
+    "hair",
+    "strand of hair",
+    "thin fiber",
+    "foreign object",
+    "contamination",
+]
 
 # 出力形式：
 #   semantic_{stem}.png : 0=bg, 1..K=クラスID(=boxes.cls+1)
@@ -24,7 +30,7 @@ SAVE_OVERLAY = True
 
 os.makedirs(OUT_DIR, exist_ok=True)
 
-model = YOLOE("yoloe-26l-seg.pt")
+model = YOLOE("yoloe-26x-seg.pt")
 model.set_classes(CLASSES)
 
 def iter_images(dir_path: str):
@@ -92,21 +98,37 @@ for img_path in iter_images(INPUT_DIR):
 
     # マスクが無い場合に備える
     if r.masks is None or r.boxes is None or len(r.boxes) == 0:
-        # 空ラベルを入力サイズに合わせて保存したいなら読み込む
         bgr = cv2.imread(str(img_path))
         if bgr is None:
             print(f"[WARN] failed to read: {img_path}")
             continue
         semantic = np.zeros((bgr.shape[0], bgr.shape[1]), dtype=np.int32)
+        print(f"\n[{img_path.name}] 検出なし")
     else:
         masks = r.masks.data.cpu().numpy()  # [N, H, W] (model input size)
         cls = r.boxes.cls.cpu().numpy().astype(int)  # [N]
-        # 必要なら信頼度でフィルタ
-        if hasattr(r.boxes, "conf") and r.boxes.conf is not None:
-            conf = r.boxes.conf.cpu().numpy()
-            keep = conf >= CONF_TH
+        confs = r.boxes.conf.cpu().numpy() if hasattr(r.boxes, "conf") and r.boxes.conf is not None else None
+        xyxy = r.boxes.xyxy.cpu().numpy()  # [N, 4] bbox座標
+
+        # 信頼度でフィルタ
+        if confs is not None:
+            keep = confs >= CONF_TH
             masks = masks[keep]
             cls = cls[keep]
+            confs = confs[keep]
+            xyxy = xyxy[keep]
+
+        # 検出結果を出力
+        print(f"\n[{img_path.name}] 検出数: {len(cls)}")
+        for i in range(len(cls)):
+            class_name = CLASSES[cls[i]] if cls[i] < len(CLASSES) else f"cls_{cls[i]}"
+            c = confs[i] if confs is not None else -1
+            x1, y1, x2, y2 = xyxy[i]
+            area = (x2 - x1) * (y2 - y1)
+            mask_pixels = int((masks[i] > MASK_TH).sum())
+            print(f"  [{i}] class={class_name}  conf={c:.4f}  "
+                  f"bbox=({x1:.0f},{y1:.0f},{x2:.0f},{y2:.0f})  "
+                  f"bbox_area={area:.0f}  mask_px={mask_pixels}")
 
         H, W = masks.shape[1], masks.shape[2]
         semantic = np.zeros((H, W), dtype=np.int32)  # 0=background
@@ -116,7 +138,6 @@ for img_path in iter_images(INPUT_DIR):
             class_id = cls[i] + 1
             semantic[masks[i] > MASK_TH] = class_id
 
-        # 入力画像サイズにリサイズして保存したい場合（推奨：元画像に合わせる）
         bgr = cv2.imread(str(img_path))
         if bgr is None:
             print(f"[WARN] failed to read: {img_path}")
@@ -136,13 +157,10 @@ for img_path in iter_images(INPUT_DIR):
         out_ov = os.path.join(OUT_DIR, f"overlay_{stem}.png")
         cv2.imwrite(out_ov, overlay)
 
+    time_info = f"wall={infer_sec * 1000:.2f} ms"
     if model_infer_ms is not None:
-        print(
-            f"[OK] {img_path} -> {out_sem} | "
-            f"wall={infer_sec * 1000:.2f} ms, model_infer={model_infer_ms:.2f} ms"
-        )
-    else:
-        print(f"[OK] {img_path} -> {out_sem} | wall={infer_sec * 1000:.2f} ms")
+        time_info += f", model_infer={model_infer_ms:.2f} ms"
+    print(f"  -> {out_sem} | {time_info}")
 
 if num_images > 0:
     print(f"[SUMMARY] images={num_images}, avg_wall={total_infer_sec / num_images * 1000:.2f} ms")
