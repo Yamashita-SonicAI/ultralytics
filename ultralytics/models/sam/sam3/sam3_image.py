@@ -295,19 +295,36 @@ class SAM3SemanticModel(torch.nn.Module):
             self, backbone_out, batch=len(text_ids)
         )
         backbone_out.update({k: v for k, v in self.text_embeddings.items()})
-        with torch.profiler.record_function("SAM3Image._encode_prompt"):
-            prompt, prompt_mask = self._encode_prompt(
-                img_feats, img_pos_embeds, vis_feat_sizes, geometric_prompt,
-                visual_prompt_embed=visual_prompt_embed,
-                visual_prompt_mask=visual_prompt_mask,
-            )
         # index text features (note that regardless of early or late fusion, the batch size of
         # `txt_feats` is always the number of *prompts* in the encoder)
         txt_feats = backbone_out["language_features"][:, text_ids]
         txt_masks = backbone_out["language_mask"][text_ids]
-        # encode text
-        prompt = torch.cat([txt_feats, prompt], dim=0)
-        prompt_mask = torch.cat([txt_masks, prompt_mask], dim=1)
+        if geometric_prompt is not None or visual_prompt_embed is not None:
+            if geometric_prompt is None:
+                geometric_prompt = Prompt(
+                    box_embeddings=torch.zeros(0, len(text_ids), 4, device=text_ids.device),
+                    box_mask=torch.zeros(len(text_ids), 0, device=text_ids.device, dtype=torch.bool),
+                )
+            if visual_prompt_embed is not None and visual_prompt_mask is None:
+                visual_prompt_mask = torch.zeros(
+                    (visual_prompt_embed.shape[1], visual_prompt_embed.shape[0]),
+                    device=visual_prompt_embed.device,
+                    dtype=torch.bool,
+                )
+            with torch.profiler.record_function("SAM3Image._encode_prompt"):
+                geo_prompt, geo_mask = self._encode_prompt(
+                    img_feats,
+                    img_pos_embeds,
+                    vis_feat_sizes,
+                    geometric_prompt,
+                    visual_prompt_embed=visual_prompt_embed,
+                    visual_prompt_mask=visual_prompt_mask,
+                )
+            prompt = torch.cat([txt_feats, geo_prompt], dim=0)
+            prompt_mask = torch.cat([txt_masks, geo_mask], dim=1)
+        else:
+            prompt = txt_feats
+            prompt_mask = txt_masks
 
         # Run the encoder
         with torch.profiler.record_function("SAM3Image._run_encoder"):

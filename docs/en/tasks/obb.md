@@ -66,7 +66,7 @@ Train YOLO26n-obb on the DOTA8 dataset for 100 [epochs](https://www.ultralytics.
         # Load a model
         model = YOLO("yolo26n-obb.yaml")  # build a new model from YAML
         model = YOLO("yolo26n-obb.pt")  # load a pretrained model (recommended for training)
-        model = YOLO("yolo26n-obb.yaml").load("yolo26n.pt")  # build from YAML and transfer weights
+        model = YOLO("yolo26n-obb.yaml").load("yolo26n-obb.pt")  # build from YAML and transfer weights
 
         # Train the model
         results = model.train(data="dota8.yaml", epochs=100, imgsz=640)
@@ -98,7 +98,7 @@ Train YOLO26n-obb on the DOTA8 dataset for 100 [epochs](https://www.ultralytics.
 
 ### Dataset format
 
-OBB dataset format can be found in detail in the [Dataset Guide](../datasets/obb/index.md). The YOLO OBB format designates bounding boxes by their four corner points with coordinates normalized between 0 and 1, following this structure:
+OBB dataset format can be found in detail in the [Dataset Guide](../datasets/obb/index.md). The YOLO OBB format designates bounding boxes by their four corner points with coordinates normalized between 0 and 1, following this structure. [Ultralytics Platform](https://platform.ultralytics.com) supports OBB annotation with a dedicated oriented bounding box drawing tool:
 
 ```
 class_index x1 y1 x2 y2 x3 y3 x4 y4
@@ -127,6 +127,7 @@ Validate trained YOLO26n-obb model [accuracy](https://www.ultralytics.com/glossa
         metrics.box.map50  # map50(B)
         metrics.box.map75  # map75(B)
         metrics.box.maps  # a list containing mAP50-95(B) for each category
+        metrics.box.image_metrics  # per-image metrics dictionary with precision, recall, F1, TP, FP, and FN
         ```
 
     === "CLI"
@@ -181,6 +182,21 @@ Use a trained YOLO26n-obb model to run predictions on images.
 </p>
 
 See full `predict` mode details in the [Predict](../modes/predict.md) page.
+
+### Results Output
+
+Oriented bounding box detection returns one `Results` object per image. The primary prediction field is `result.obb`,
+which contains rotated boxes, class IDs, and confidence scores for each detected object.
+
+| Attribute             | Type            | Shape     | Description                              |
+| --------------------- | --------------- | --------- | ---------------------------------------- |
+| `result.obb`          | `OBB`           | `(N)`     | Oriented boxes.                          |
+| `result.obb.data`     | `torch.float32` | `(N,7/8)` | Raw rotated boxes with confidence/class. |
+| `result.obb.xywhr`    | `torch.float32` | `(N,5)`   | `xywhr` rotated boxes.                   |
+| `result.obb.xyxyxyxy` | `torch.float32` | `(N,4,2)` | Four corner points.                      |
+| `result.obb.conf`     | `torch.float32` | `(N,)`    | Confidence scores.                       |
+
+For task-specific `Results` fields across every task, see the [Predict Results by Task](../modes/predict.md#results-by-task) section.
 
 ## Export
 
